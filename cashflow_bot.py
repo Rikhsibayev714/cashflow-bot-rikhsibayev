@@ -43,7 +43,7 @@ KASSAS = ["Импорт Савдо", "Касса Ахрор", "Пластик к
 logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-STEP_TYPE, STEP_KASSA, STEP_UZS, STEP_USD, STEP_NOTE, STEP_CONFIRM = range(6)
+STEP_TYPE, STEP_KASSA, STEP_UZS, STEP_USD, STEP_NOTE, STEP_CONFIRM, STEP_INCOME_TYPE = range(7)
 EDIT_FIELD, EDIT_VALUE, EDIT_CONFIRM = range(10, 13)
 
 SCOPES = [
@@ -362,7 +362,8 @@ def summary(ud: dict) -> str:
         f"🏦 Касса: {ud.get('kassa', '—')}\n"
         f"💵 UZS: {fmt(ud.get('uzs'))}\n"
         f"💲 USD: {fmt(ud.get('usd'))}\n"
-        f"📝 Назначение: {ud.get('note', '—')}"
+        f"📝 Назначение: {ud.get('note', '—')}\n"
+        f"🏷 Тип: {ud.get('income_type') or '—'}"
     )
 
 def row_to_text(r: dict, idx=None) -> str:
@@ -743,6 +744,40 @@ async def step_usd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def step_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["note"] = update.message.text.strip()
     context.user_data["date"] = datetime.today()
+
+    # Если приход — спрашиваем тип
+    if context.user_data.get("type") == "inflow":
+        kb = [["👤 Клиент", "🔄 Другое"]]
+        await update.message.reply_text(
+            "Тип прихода:",
+            reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True),
+        )
+        return STEP_INCOME_TYPE
+
+    # Расход — сразу подтверждение
+    context.user_data["income_type"] = None
+    kb = [["✅ Подтвердить", "❌ Отмена"]]
+    await update.message.reply_text(
+        f"Проверь данные:\n\n{summary(context.user_data)}",
+        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True),
+    )
+    return STEP_CONFIRM
+
+
+async def step_income_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    if "Клиент" in text:
+        context.user_data["income_type"] = "Клиент"
+    elif "Другое" in text:
+        context.user_data["income_type"] = "Другое"
+    else:
+        kb = [["👤 Клиент", "🔄 Другое"]]
+        await update.message.reply_text(
+            "Выбери тип:",
+            reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True),
+        )
+        return STEP_INCOME_TYPE
+
     kb = [["✅ Подтвердить", "❌ Отмена"]]
     await update.message.reply_text(
         f"Проверь данные:\n\n{summary(context.user_data)}",
@@ -771,6 +806,7 @@ async def step_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "outflow_uzs": ud.get("uzs") if t == "outflow" else None,
         "outflow_usd": ud.get("usd") if t == "outflow" else None,
         "note":        ud.get("note", ""),
+        "income_type": ud.get("income_type"),
     }
     await update.message.reply_text("Сохраняю...", reply_markup=ReplyKeyboardRemove())
     ok, msg = write_transaction(data)
@@ -866,6 +902,7 @@ def main():
             STEP_USD:     [MessageHandler(filters.TEXT & ~filters.COMMAND, step_usd)],
             STEP_NOTE:    [MessageHandler(filters.TEXT & ~filters.COMMAND, step_note)],
             STEP_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, step_confirm)],
+            STEP_INCOME_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, step_income_type)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
