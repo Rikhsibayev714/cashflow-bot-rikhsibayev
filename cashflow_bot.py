@@ -148,6 +148,7 @@ def write_transaction(data: dict):
             (f"E{row}", data["note"]),
             (f"F{row}", data["outflow_uzs"] or ""),
             (f"G{row}", data["outflow_usd"] or ""),
+            (f"K{row}", data.get("income_type") or ""),
             (f"T{row}", "Telegram Bot"),
         ]
         for cell, val in updates:
