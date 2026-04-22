@@ -1,12 +1,13 @@
 """
-Cashflow Telegram Bot — Google Sheets версия
-Python 3.14 совместимая версия
+Cashflow Telegram Bot — Google Sheets + Render Free (Web Service)
 """
 
 import logging
 import os
 import json
+import threading
 from datetime import datetime
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -22,6 +23,8 @@ from telegram.ext import (
 
 BOT_TOKEN      = os.environ.get("BOT_TOKEN", "")
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "")
+PORT           = int(os.environ.get("PORT", "8080"))
+
 KASSAS = ["Импорт Савдо", "Касса Ахрор", "Пластик карта"]
 
 logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO)
@@ -33,6 +36,24 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
+
+# ─── Простой HTTP сервер чтобы Render не останавливал сервис ───
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Cashflow Bot is running!")
+    def log_message(self, format, *args):
+        pass  # отключаем лишние логи
+
+def start_health_server():
+    server = HTTPServer(("0.0.0.0", PORT), HealthHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    logger.info(f"Health server started on port {PORT}")
+
+# ─── Google Sheets ───
 
 def get_gc():
     creds_json = os.environ.get("GOOGLE_CREDS")
@@ -131,6 +152,8 @@ def read_balance():
     except Exception as e:
         return None, f"Ошибка чтения Balance: {e}"
 
+# ─── Форматирование ───
+
 def fmt(val) -> str:
     if val is None or val == "" or val == 0:
         return "—"
@@ -168,6 +191,8 @@ def row_to_text(r: dict, idx=None) -> str:
         f"  UZS: {uzs}   USD: {usd}\n"
         f"  Назначение: {r.get('note') or '—'}"
     )
+
+# ─── Команды ───
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [["Приход", "Расход"]]
@@ -219,6 +244,8 @@ async def cmd_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total_usd = sum(it["usd"] for it in items)
     lines.append(f"\nИТОГО:\n  UZS: {fmt(total_uzs)}\n  USD: {fmt(total_usd)}")
     await update.message.reply_text("\n".join(lines))
+
+# ─── Диалог ───
 
 async def step_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
@@ -317,14 +344,13 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Отменено. Напиши /start.", reply_markup=ReplyKeyboardRemove())
     return ConversationHandler.END
 
+# ─── Запуск ───
+
 def main():
-    # Используем JobQueue=False для совместимости с Python 3.14
-    app = (
-        Application.builder()
-        .token(BOT_TOKEN)
-        .updater(None)
-        .build()
-    )
+    # Запускаем HTTP сервер в фоне (для Render)
+    start_health_server()
+
+    app = Application.builder().token(BOT_TOKEN).build()
 
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", cmd_start)],
@@ -348,17 +374,7 @@ def main():
     print("Команды: /start  /history  /balance")
     print("=" * 50)
 
-    import asyncio
-
-    async def run():
-        await app.initialize()
-        await app.start()
-        await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
-        # держим процесс живым
-        stop_event = asyncio.Event()
-        await stop_event.wait()
-
-    asyncio.run(run())
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
