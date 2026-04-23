@@ -27,14 +27,11 @@ from telegram.ext import (
 BOT_TOKEN      = os.environ.get("BOT_TOKEN", "")
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "")
 PORT           = int(os.environ.get("PORT", "8080"))
-RENDER_URL     = os.environ.get("RENDER_URL", "")  # https://cashflow-bot-t14c.onrender.com
+RENDER_URL     = os.environ.get("RENDER_URL", "")
 
 ALLOWED_IDS_STR = os.environ.get("ALLOWED_IDS", "")
 ALLOWED_IDS = [int(x.strip()) for x in ALLOWED_IDS_STR.split(",") if x.strip()] if ALLOWED_IDS_STR else []
 
-# Время отчётов UTC (Ташкент = UTC+5)
-# 04:00 UTC = 09:00 Ташкент (утренний)
-# 13:00 UTC = 18:00 Ташкент (вечерний)
 MORNING_HOUR = int(os.environ.get("MORNING_HOUR", "4"))
 EVENING_HOUR = int(os.environ.get("EVENING_HOUR", "13"))
 
@@ -51,10 +48,6 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
-# ─────────────────────────────────────────────
-#  Health сервер + автопинг
-# ─────────────────────────────────────────────
-
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -70,7 +63,6 @@ def start_health_server():
     logger.info(f"Health server on port {PORT}")
 
 async def ping_self(context):
-    """Пингует сам себя каждые 10 минут чтобы не засыпать на Render."""
     if not RENDER_URL:
         return
     try:
@@ -80,10 +72,6 @@ async def ping_self(context):
     except Exception as e:
         logger.warning(f"Self-ping failed: {e}")
 
-# ─────────────────────────────────────────────
-#  Защита по ID
-# ─────────────────────────────────────────────
-
 def is_allowed(update: Update) -> bool:
     if not ALLOWED_IDS:
         return True
@@ -92,15 +80,9 @@ def is_allowed(update: Update) -> bool:
 async def check_access(update: Update) -> bool:
     if not is_allowed(update):
         uid = update.effective_user.id
-        await update.message.reply_text(
-            f"⛔ Нет доступа.\nТвой ID: {uid}"
-        )
+        await update.message.reply_text(f"⛔ Нет доступа.\nТвой ID: {uid}")
         return False
     return True
-
-# ─────────────────────────────────────────────
-#  Google Sheets
-# ─────────────────────────────────────────────
 
 def get_gc():
     creds_json = os.environ.get("GOOGLE_CREDS")
@@ -237,7 +219,12 @@ def read_balance():
                 continue
             def to_num(v):
                 try:
-                    return float(str(v).replace(" ", "").replace(",", "."))
+                    s = str(v).strip().replace("\xa0", "").replace(" ", "")
+                    if s.count(",") == 1 and s.count(".") >= 1:
+                        s = s.replace(".", "").replace(",", ".")
+                    elif s.count(",") == 1:
+                        s = s.replace(",", ".")
+                    return float(s)
                 except Exception:
                     return 0.0
             items.append({
@@ -251,7 +238,6 @@ def read_balance():
         return None, f"Ошибка: {e}"
 
 def get_today_summary():
-    """Возвращает итоги за сегодня."""
     rows = read_all_rows()
     if isinstance(rows, str):
         return None, rows
@@ -281,21 +267,9 @@ def get_today_summary():
         "net_usd": in_usd - out_usd,
     }, None
 
-# ─────────────────────────────────────────────
-#  Быстрый ввод парсер
-# ─────────────────────────────────────────────
-
 def parse_quick_input(text: str):
-    """
-    Парсит строку вида:
-    'приход 500000 Импорт Савдо зарплата'
-    'расход 100 usd Касса Ахрор аренда'
-    Возвращает dict или None.
-    """
     text = text.strip()
     lower = text.lower()
-
-    # Тип операции
     if lower.startswith("приход") or lower.startswith("прих"):
         op_type = "inflow"
         rest = text[6:].strip()
@@ -304,24 +278,18 @@ def parse_quick_input(text: str):
         rest = text[6:].strip()
     else:
         return None
-
-    # Сумма и валюта
     parts = rest.split()
     if not parts:
         return None
-
     try:
         amount = float(parts[0].replace(",", "."))
     except ValueError:
         return None
-
     rest2 = " ".join(parts[1:])
     is_usd = False
     if rest2.lower().startswith("usd") or rest2.lower().startswith("$"):
         is_usd = True
         rest2 = rest2[3:].strip() if rest2.lower().startswith("usd") else rest2[1:].strip()
-
-    # Касса
     kassa_found = None
     note = rest2
     for k in KASSAS:
@@ -329,7 +297,6 @@ def parse_quick_input(text: str):
             kassa_found = k
             note = rest2.lower().replace(k.lower(), "").strip()
             break
-
     return {
         "type":    op_type,
         "amount":  amount,
@@ -337,10 +304,6 @@ def parse_quick_input(text: str):
         "kassa":   kassa_found,
         "note":    note or "—",
     }
-
-# ─────────────────────────────────────────────
-#  Форматирование
-# ─────────────────────────────────────────────
 
 def fmt(val) -> str:
     if val is None or val == "" or val == 0:
@@ -400,10 +363,6 @@ def balance_text(items: list, title="💰 БАЛАНС") -> str:
     lines.append(f"\n📊 ИТОГО:\n  UZS: {fmt(total_uzs)}\n  USD: {fmt(total_usd)}")
     return "\n".join(lines)
 
-# ─────────────────────────────────────────────
-#  Главное меню
-# ─────────────────────────────────────────────
-
 MAIN_MENU = ReplyKeyboardMarkup(
     [
         ["➕ Приход", "➖ Расход"],
@@ -413,10 +372,6 @@ MAIN_MENU = ReplyKeyboardMarkup(
     resize_keyboard=True,
     one_time_keyboard=False,
 )
-
-# ─────────────────────────────────────────────
-#  Команды
-# ─────────────────────────────────────────────
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update):
@@ -509,10 +464,6 @@ async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append(row_to_text(r, i))
         lines.append("")
     await update.message.reply_text("\n".join(lines), reply_markup=MAIN_MENU)
-
-# ─────────────────────────────────────────────
-#  /edit
-# ─────────────────────────────────────────────
 
 EDIT_FIELD_LABELS = {
     "Касса":      "kassa",
@@ -630,16 +581,10 @@ async def edit_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-# ─────────────────────────────────────────────
-#  Диалог — новая запись
-# ─────────────────────────────────────────────
-
 async def step_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update):
         return ConversationHandler.END
     text = update.message.text.strip()
-
-    # Кнопки меню
     if "Баланс" in text:
         await cmd_balance(update, context)
         return STEP_TYPE
@@ -652,8 +597,6 @@ async def step_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "Редактировать" in text:
         await cmd_edit(update, context)
         return ConversationHandler.END
-
-    # Быстрый ввод
     parsed = parse_quick_input(text)
     if parsed:
         context.user_data["type"]  = parsed["type"]
@@ -666,9 +609,7 @@ async def step_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             context.user_data["uzs"] = parsed["amount"]
             context.user_data["usd"] = None
-
         if parsed["kassa"]:
-            # Касса найдена — сразу показываем подтверждение
             kb = [["✅ Подтвердить", "❌ Отмена"]]
             await update.message.reply_text(
                 f"Проверь данные:\n\n{summary(context.user_data)}",
@@ -676,15 +617,12 @@ async def step_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return STEP_CONFIRM
         else:
-            # Касса не найдена — спрашиваем
             kb = [[k] for k in KASSAS]
             await update.message.reply_text(
                 f"Касса не распознана. Выбери:\n\n{summary(context.user_data)}",
                 reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True),
             )
             return STEP_KASSA
-
-    # Обычный диалог
     if "Приход" in text:
         context.user_data["type"] = "inflow"
     elif "Расход" in text:
@@ -695,7 +633,6 @@ async def step_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=MAIN_MENU
         )
         return STEP_TYPE
-
     kb = [[k] for k in KASSAS]
     await update.message.reply_text("🏦 Выбери кассу:",
         reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True))
@@ -709,7 +646,6 @@ async def step_kassa(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True))
         return STEP_KASSA
     context.user_data["kassa"] = text
-    # Если пришли из быстрого ввода — сразу подтверждение
     if "uzs" in context.user_data or "usd" in context.user_data:
         kb = [["✅ Подтвердить", "❌ Отмена"]]
         await update.message.reply_text(
@@ -745,8 +681,6 @@ async def step_usd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def step_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["note"] = update.message.text.strip()
     context.user_data["date"] = datetime.today()
-
-    # Если приход — спрашиваем тип
     if context.user_data.get("type") == "inflow":
         kb = [["👤 Клиент", "🔄 Другое"]]
         await update.message.reply_text(
@@ -754,8 +688,6 @@ async def step_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True),
         )
         return STEP_INCOME_TYPE
-
-    # Расход — сразу подтверждение
     context.user_data["income_type"] = None
     kb = [["✅ Подтвердить", "❌ Отмена"]]
     await update.message.reply_text(
@@ -763,7 +695,6 @@ async def step_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True),
     )
     return STEP_CONFIRM
-
 
 async def step_income_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
@@ -773,12 +704,9 @@ async def step_income_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["income_type"] = "Другое"
     else:
         kb = [["👤 Клиент", "🔄 Другое"]]
-        await update.message.reply_text(
-            "Выбери тип:",
-            reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True),
-        )
+        await update.message.reply_text("Выбери тип:",
+            reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True))
         return STEP_INCOME_TYPE
-
     kb = [["✅ Подтвердить", "❌ Отмена"]]
     await update.message.reply_text(
         f"Проверь данные:\n\n{summary(context.user_data)}",
@@ -823,12 +751,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Отменено.", reply_markup=MAIN_MENU)
     return STEP_TYPE
 
-# ─────────────────────────────────────────────
-#  Ежедневные отчёты
-# ─────────────────────────────────────────────
-
 async def morning_report(context):
-    """09:00 Ташкент — баланс."""
     if not ALLOWED_IDS:
         return
     items, err = read_balance()
@@ -842,7 +765,6 @@ async def morning_report(context):
             logger.error(f"Morning report error {uid}: {e}")
 
 async def evening_report(context):
-    """18:00 Ташкент — итоги дня."""
     if not ALLOWED_IDS:
         return
     data, err = get_today_summary()
@@ -870,16 +792,10 @@ async def evening_report(context):
         except Exception as e:
             logger.error(f"Evening report error {uid}: {e}")
 
-# ─────────────────────────────────────────────
-#  Запуск
-# ─────────────────────────────────────────────
-
 def main():
     start_health_server()
-
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Диалог редактирования
     edit_conv = ConversationHandler(
         entry_points=[CommandHandler("edit", cmd_edit)],
         states={
@@ -890,19 +806,18 @@ def main():
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
-    # Основной диалог
     conv = ConversationHandler(
         entry_points=[
             CommandHandler("start", cmd_start),
             MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_start),
         ],
         states={
-            STEP_TYPE:    [MessageHandler(filters.TEXT & ~filters.COMMAND, step_type)],
-            STEP_KASSA:   [MessageHandler(filters.TEXT & ~filters.COMMAND, step_kassa)],
-            STEP_UZS:     [MessageHandler(filters.TEXT & ~filters.COMMAND, step_uzs)],
-            STEP_USD:     [MessageHandler(filters.TEXT & ~filters.COMMAND, step_usd)],
-            STEP_NOTE:    [MessageHandler(filters.TEXT & ~filters.COMMAND, step_note)],
-            STEP_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, step_confirm)],
+            STEP_TYPE:        [MessageHandler(filters.TEXT & ~filters.COMMAND, step_type)],
+            STEP_KASSA:       [MessageHandler(filters.TEXT & ~filters.COMMAND, step_kassa)],
+            STEP_UZS:         [MessageHandler(filters.TEXT & ~filters.COMMAND, step_uzs)],
+            STEP_USD:         [MessageHandler(filters.TEXT & ~filters.COMMAND, step_usd)],
+            STEP_NOTE:        [MessageHandler(filters.TEXT & ~filters.COMMAND, step_note)],
+            STEP_CONFIRM:     [MessageHandler(filters.TEXT & ~filters.COMMAND, step_confirm)],
             STEP_INCOME_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, step_income_type)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
@@ -910,16 +825,15 @@ def main():
 
     app.add_handler(edit_conv)
     app.add_handler(conv)
-    app.add_handler(CommandHandler("balance",  cmd_balance))
-    app.add_handler(CommandHandler("history",  cmd_history))
-    app.add_handler(CommandHandler("today",    cmd_today))
-    app.add_handler(CommandHandler("search",   cmd_search))
+    app.add_handler(CommandHandler("balance", cmd_balance))
+    app.add_handler(CommandHandler("history", cmd_history))
+    app.add_handler(CommandHandler("today",   cmd_today))
+    app.add_handler(CommandHandler("search",  cmd_search))
 
-    # Расписание
     jq = app.job_queue
     jq.run_daily(morning_report, time=time(hour=MORNING_HOUR, minute=0))
     jq.run_daily(evening_report, time=time(hour=EVENING_HOUR, minute=0))
-    jq.run_repeating(ping_self, interval=600, first=60)  # пинг каждые 10 минут
+    jq.run_repeating(ping_self, interval=600, first=60)
 
     print("=" * 50)
     print("Cashflow Bot запущен!")
