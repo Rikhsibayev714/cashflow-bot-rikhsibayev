@@ -661,8 +661,9 @@ async def step_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return STEP_TYPE
     kb = [[k] for k in KASSAS]
-    await update.message.reply_text("🏦 Выбери кассу:",
+    bot_msg = await update.message.reply_text("🏦 Выбери кассу:",
         reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True))
+    track_msg(context, bot_msg)
     return STEP_KASSA
 
 async def step_kassa(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -681,7 +682,8 @@ async def step_kassa(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True),
         )
         return STEP_CONFIRM
-    await update.message.reply_text("💵 Сумма UZS (или 0):", reply_markup=ReplyKeyboardRemove())
+    bot_msg = await update.message.reply_text("💵 Сумма UZS (или 0):", reply_markup=ReplyKeyboardRemove())
+    track_msg(context, bot_msg)
     return STEP_UZS
 
 async def step_uzs(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -693,7 +695,8 @@ async def step_uzs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("Введи число, например: 500000 или 0")
         return STEP_UZS
-    await update.message.reply_text("💲 Сумма USD (или 0):")
+    bot_msg = await update.message.reply_text("💲 Сумма USD (или 0):")
+    track_msg(context, bot_msg)
     return STEP_USD
 
 async def step_usd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -705,7 +708,8 @@ async def step_usd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("Введи число, например: 100 или 0")
         return STEP_USD
-    await update.message.reply_text("📝 Назначение / комментарий:")
+    bot_msg = await update.message.reply_text("📝 Назначение / комментарий:")
+    track_msg(context, bot_msg)
     return STEP_NOTE
 
 async def step_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -714,17 +718,19 @@ async def step_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["date"] = datetime.today()
     if context.user_data.get("type") == "inflow":
         kb = [["👤 Клиент", "🔄 Другое"]]
-        await update.message.reply_text(
+        bot_msg = await update.message.reply_text(
             "Тип прихода:",
             reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True),
         )
+        track_msg(context, bot_msg)
         return STEP_INCOME_TYPE
     context.user_data["income_type"] = None
     kb = [["✅ Подтвердить", "❌ Отмена"]]
-    await update.message.reply_text(
+    bot_msg = await update.message.reply_text(
         f"Проверь данные:\n\n{summary(context.user_data)}",
         reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True),
     )
+    track_msg(context, bot_msg)
     return STEP_CONFIRM
 
 async def step_income_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -740,10 +746,11 @@ async def step_income_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True))
         return STEP_INCOME_TYPE
     kb = [["✅ Подтвердить", "❌ Отмена"]]
-    await update.message.reply_text(
+    bot_msg = await update.message.reply_text(
         f"Проверь данные:\n\n{summary(context.user_data)}",
         reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True),
     )
+    track_msg(context, bot_msg)
     return STEP_CONFIRM
 
 async def step_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -757,8 +764,9 @@ async def step_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return STEP_TYPE
     if "Подтвердить" not in text:
         kb = [["✅ Подтвердить", "❌ Отмена"]]
-        await update.message.reply_text("Нажми кнопку:",
+        bot_msg = await update.message.reply_text("Нажми кнопку:",
             reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True))
+        track_msg(context, bot_msg)
         return STEP_CONFIRM
     ud = context.user_data
     t  = ud.get("type")
