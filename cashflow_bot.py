@@ -38,7 +38,7 @@ ALLOWED_IDS = [int(x.strip()) for x in ALLOWED_IDS_STR.split(",") if x.strip()] 
 MORNING_HOUR = int(os.environ.get("MORNING_HOUR", "4"))
 EVENING_HOUR = int(os.environ.get("EVENING_HOUR", "13"))
 
-KASSAS = ["Импорт Савдо", "Касса Ахрор", "Пластик карта"]
+KASSAS = ["Импорт Савдо", "Касса Ахрор", "Пластик карта", "Торговый 02", "Ислом ака карта", "Даврон ака карта"]
 
 logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
