@@ -246,7 +246,12 @@ def get_today_summary():
 
     def to_f(v):
         try:
-            return float(str(v).replace(" ", "").replace(",", "."))
+            s = str(v).strip().replace("\xa0", "").replace(" ", "")
+            if s.count(",") == 1 and s.count(".") >= 1:
+                s = s.replace(".", "").replace(",", ".")
+            elif s.count(",") == 1:
+                s = s.replace(",", ".")
+            return float(s)
         except Exception:
             return 0.0
 
