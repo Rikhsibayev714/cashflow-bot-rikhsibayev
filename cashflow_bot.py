@@ -581,9 +581,36 @@ async def edit_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
+async def delete_dialog_messages(context, chat_id):
+    """Удаляет все сообщения диалога."""
+    msg_ids = context.user_data.get("msg_ids", [])
+    for msg_id in msg_ids:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+        except Exception:
+            pass
+    context.user_data["msg_ids"] = []
+
+
+def track_msg(context, message):
+    """Добавляет ID сообщения в список для удаления."""
+    if "msg_ids" not in context.user_data:
+        context.user_data["msg_ids"] = []
+    if message and hasattr(message, "message_id"):
+        context.user_data["msg_ids"].append(message.message_id)
+
+
+async def reply_and_track(update, context, text, **kwargs):
+    """Отправляет сообщение и трекает его ID."""
+    msg = await update.message.reply_text(text, **kwargs)
+    track_msg(context, msg)
+    return msg
+
+
 async def step_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update):
         return ConversationHandler.END
+    track_msg(context, update.message)
     text = update.message.text.strip()
     if "Баланс" in text:
         await cmd_balance(update, context)
@@ -639,6 +666,7 @@ async def step_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return STEP_KASSA
 
 async def step_kassa(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    track_msg(context, update.message)
     text = update.message.text.strip()
     if text not in KASSAS:
         kb = [[k] for k in KASSAS]
@@ -657,6 +685,7 @@ async def step_kassa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return STEP_UZS
 
 async def step_uzs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    track_msg(context, update.message)
     text = update.message.text.strip().replace(" ", "").replace(",", ".")
     try:
         val = float(text)
@@ -668,6 +697,7 @@ async def step_uzs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return STEP_USD
 
 async def step_usd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    track_msg(context, update.message)
     text = update.message.text.strip().replace(" ", "").replace(",", ".")
     try:
         val = float(text)
@@ -679,6 +709,7 @@ async def step_usd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return STEP_NOTE
 
 async def step_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    track_msg(context, update.message)
     context.user_data["note"] = update.message.text.strip()
     context.user_data["date"] = datetime.today()
     if context.user_data.get("type") == "inflow":
@@ -697,6 +728,7 @@ async def step_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return STEP_CONFIRM
 
 async def step_income_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    track_msg(context, update.message)
     text = update.message.text.strip()
     if "Клиент" in text:
         context.user_data["income_type"] = "Клиент"
@@ -715,10 +747,13 @@ async def step_income_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return STEP_CONFIRM
 
 async def step_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    track_msg(context, update.message)
     text = update.message.text
     if "Отмена" in text:
+        chat_id = update.message.chat_id
+        await delete_dialog_messages(context, chat_id)
         context.user_data.clear()
-        await update.message.reply_text("Отменено.", reply_markup=MAIN_MENU)
+        await context.bot.send_message(chat_id=chat_id, text="Отменено.", reply_markup=MAIN_MENU)
         return STEP_TYPE
     if "Подтвердить" not in text:
         kb = [["✅ Подтвердить", "❌ Отмена"]]
@@ -737,10 +772,18 @@ async def step_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "note":        ud.get("note", ""),
         "income_type": ud.get("income_type"),
     }
-    await update.message.reply_text("Сохраняю...", reply_markup=ReplyKeyboardRemove())
+    chat_id = update.message.chat_id
+    saving_msg = await update.message.reply_text("Сохраняю...", reply_markup=ReplyKeyboardRemove())
+    track_msg(context, saving_msg)
     ok, msg = write_transaction(data)
-    await update.message.reply_text(
-        f"✅ Сохранено! {msg}" if ok else f"❌ {msg}",
+
+    # Удаляем весь диалог
+    await delete_dialog_messages(context, chat_id)
+
+    # Показываем краткий итог
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"✅ Сохранено! {msg}" if ok else f"❌ {msg}",
         reply_markup=MAIN_MENU
     )
     context.user_data.clear()
