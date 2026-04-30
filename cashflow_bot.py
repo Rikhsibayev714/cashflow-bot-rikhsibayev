@@ -48,6 +48,46 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
+# ─────────────────────────────────────────────
+#  КЛАВИАТУРЫ — кнопка отмены есть везде
+# ─────────────────────────────────────────────
+CANCEL_BTN = "❌ Отмена"
+
+def kassa_kb():
+    """Клавиатура выбора кассы с кнопкой отмены."""
+    return ReplyKeyboardMarkup(
+        [[k] for k in KASSAS] + [[CANCEL_BTN]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+def confirm_kb():
+    """Клавиатура подтверждения с кнопкой отмены."""
+    return ReplyKeyboardMarkup(
+        [["✅ Подтвердить", CANCEL_BTN]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+def income_type_kb():
+    """Клавиатура типа прихода с кнопкой отмены."""
+    return ReplyKeyboardMarkup(
+        [["👤 Клиент", "🔄 Другое"], [CANCEL_BTN]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+def cancel_only_kb():
+    """Только кнопка отмены (для шагов с вводом текста/цифр)."""
+    return ReplyKeyboardMarkup(
+        [[CANCEL_BTN]],
+        resize_keyboard=True,
+        one_time_keyboard=False,
+    )
+
+# ─────────────────────────────────────────────
+#  HEALTH SERVER
+# ─────────────────────────────────────────────
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -72,6 +112,9 @@ async def ping_self(context):
     except Exception as e:
         logger.warning(f"Self-ping failed: {e}")
 
+# ─────────────────────────────────────────────
+#  ДОСТУП
+# ─────────────────────────────────────────────
 def is_allowed(update: Update) -> bool:
     if not ALLOWED_IDS:
         return True
@@ -84,6 +127,9 @@ async def check_access(update: Update) -> bool:
         return False
     return True
 
+# ─────────────────────────────────────────────
+#  GOOGLE SHEETS
+# ─────────────────────────────────────────────
 def get_gc():
     creds_json = os.environ.get("GOOGLE_CREDS")
     if creds_json:
@@ -310,6 +356,9 @@ def parse_quick_input(text: str):
         "note":    note or "—",
     }
 
+# ─────────────────────────────────────────────
+#  ФОРМАТИРОВАНИЕ
+# ─────────────────────────────────────────────
 def fmt(val) -> str:
     if val is None or val == "" or val == 0:
         return "—"
@@ -368,6 +417,9 @@ def balance_text(items: list, title="💰 БАЛАНС") -> str:
     lines.append(f"\n📊 ИТОГО:\n  UZS: {fmt(total_uzs)}\n  USD: {fmt(total_usd)}")
     return "\n".join(lines)
 
+# ─────────────────────────────────────────────
+#  ГЛАВНОЕ МЕНЮ
+# ─────────────────────────────────────────────
 MAIN_MENU = ReplyKeyboardMarkup(
     [
         ["➕ Приход", "➖ Расход"],
@@ -378,6 +430,33 @@ MAIN_MENU = ReplyKeyboardMarkup(
     one_time_keyboard=False,
 )
 
+# ─────────────────────────────────────────────
+#  ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ─────────────────────────────────────────────
+async def go_to_main(update: Update, context: ContextTypes.DEFAULT_TYPE, text="Отменено. Главное меню."):
+    """Очищает данные и возвращает на главный экран."""
+    await delete_dialog_messages(context, update.message.chat_id)
+    context.user_data.clear()
+    await update.message.reply_text(text, reply_markup=MAIN_MENU)
+
+async def delete_dialog_messages(context, chat_id):
+    msg_ids = context.user_data.get("msg_ids", [])
+    for msg_id in msg_ids:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+        except Exception:
+            pass
+    context.user_data["msg_ids"] = []
+
+def track_msg(context, message):
+    if "msg_ids" not in context.user_data:
+        context.user_data["msg_ids"] = []
+    if message and hasattr(message, "message_id"):
+        context.user_data["msg_ids"].append(message.message_id)
+
+# ─────────────────────────────────────────────
+#  КОМАНДЫ (БАЛАНС / ИСТОРИЯ / СЕГОДНЯ / ПОИСК)
+# ─────────────────────────────────────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update):
         return ConversationHandler.END
@@ -470,6 +549,9 @@ async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append("")
     await update.message.reply_text("\n".join(lines), reply_markup=MAIN_MENU)
 
+# ─────────────────────────────────────────────
+#  РЕДАКТИРОВАНИЕ
+# ─────────────────────────────────────────────
 EDIT_FIELD_LABELS = {
     "Касса":      "kassa",
     "UZS":        "uzs",
@@ -496,7 +578,7 @@ async def cmd_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📝 {entry.get('note') or '—'}\n\n"
         f"Что изменить?"
     )
-    kb = [[f] for f in EDIT_FIELD_LABELS.keys()] + [["❌ Отмена"]]
+    kb = [[f] for f in EDIT_FIELD_LABELS.keys()] + [[CANCEL_BTN]]
     await update.message.reply_text(
         text,
         reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True),
@@ -505,29 +587,31 @@ async def cmd_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def edit_choose_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
-    if text == "❌ Отмена":
-        await update.message.reply_text("Отменено.", reply_markup=MAIN_MENU)
+    if text == CANCEL_BTN:
+        await go_to_main(update, context)
         return ConversationHandler.END
     if text not in EDIT_FIELD_LABELS:
-        kb = [[f] for f in EDIT_FIELD_LABELS.keys()] + [["❌ Отмена"]]
+        kb = [[f] for f in EDIT_FIELD_LABELS.keys()] + [[CANCEL_BTN]]
         await update.message.reply_text("Выбери поле:",
             reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True))
         return EDIT_FIELD
     context.user_data["edit_field"] = text
     context.user_data["edit_field_key"] = EDIT_FIELD_LABELS[text]
     if text == "Касса":
-        kb = [[k] for k in KASSAS] + [["❌ Отмена"]]
+        kb = [[k] for k in KASSAS] + [[CANCEL_BTN]]
         await update.message.reply_text("Выбери кассу:",
             reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True))
     else:
-        await update.message.reply_text(f"Введи новое значение для «{text}»:",
-            reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text(
+            f"Введи новое значение для «{text}»:",
+            reply_markup=cancel_only_kb(),
+        )
     return EDIT_VALUE
 
 async def edit_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
-    if text == "❌ Отмена":
-        await update.message.reply_text("Отменено.", reply_markup=MAIN_MENU)
+    if text == CANCEL_BTN:
+        await go_to_main(update, context)
         return ConversationHandler.END
     field_key   = context.user_data.get("edit_field_key")
     field_label = context.user_data.get("edit_field")
@@ -535,7 +619,7 @@ async def edit_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     has_inflow  = bool(entry.get("in_uzs") or entry.get("in_usd"))
     if field_key == "kassa":
         if text not in KASSAS:
-            kb = [[k] for k in KASSAS] + [["❌ Отмена"]]
+            kb = [[k] for k in KASSAS] + [[CANCEL_BTN]]
             await update.message.reply_text("Выбери из списка:",
                 reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True))
             return EDIT_VALUE
@@ -546,34 +630,42 @@ async def edit_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             new_val = float(text.replace(" ", "").replace(",", "."))
         except ValueError:
-            await update.message.reply_text("Введи число:")
+            await update.message.reply_text("Введи число:", reply_markup=cancel_only_kb())
             return EDIT_VALUE
     elif field_key == "usd":
         real_key = "in_usd" if has_inflow else "out_usd"
         try:
             new_val = float(text.replace(" ", "").replace(",", "."))
         except ValueError:
-            await update.message.reply_text("Введи число:")
+            await update.message.reply_text("Введи число:", reply_markup=cancel_only_kb())
             return EDIT_VALUE
     else:
         real_key = "note"
         new_val  = text
     context.user_data["edit_real_key"] = real_key
     context.user_data["edit_new_val"]  = new_val
-    kb = [["✅ Подтвердить", "❌ Отмена"]]
-    await update.message.reply_text(f"Изменить «{field_label}» на «{new_val}»?",
-        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True))
+    await update.message.reply_text(
+        f"Изменить «{field_label}» на «{new_val}»?",
+        reply_markup=ReplyKeyboardMarkup(
+            [["✅ Подтвердить", CANCEL_BTN]],
+            resize_keyboard=True,
+            one_time_keyboard=True,
+        ),
+    )
     return EDIT_CONFIRM
 
 async def edit_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-    if "Отмена" in text:
-        await update.message.reply_text("Отменено.", reply_markup=MAIN_MENU)
+    if CANCEL_BTN in text:
+        await go_to_main(update, context)
         return ConversationHandler.END
     if "Подтвердить" not in text:
-        kb = [["✅ Подтвердить", "❌ Отмена"]]
         await update.message.reply_text("Нажми кнопку:",
-            reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True))
+            reply_markup=ReplyKeyboardMarkup(
+                [["✅ Подтвердить", CANCEL_BTN]],
+                resize_keyboard=True,
+                one_time_keyboard=True,
+            ))
         return EDIT_CONFIRM
     ok, msg = update_last_bot_row(
         context.user_data.get("edit_real_key"),
@@ -586,37 +678,16 @@ async def edit_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-async def delete_dialog_messages(context, chat_id):
-    """Удаляет все сообщения диалога."""
-    msg_ids = context.user_data.get("msg_ids", [])
-    for msg_id in msg_ids:
-        try:
-            await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
-        except Exception:
-            pass
-    context.user_data["msg_ids"] = []
-
-
-def track_msg(context, message):
-    """Добавляет ID сообщения в список для удаления."""
-    if "msg_ids" not in context.user_data:
-        context.user_data["msg_ids"] = []
-    if message and hasattr(message, "message_id"):
-        context.user_data["msg_ids"].append(message.message_id)
-
-
-async def reply_and_track(update, context, text, **kwargs):
-    """Отправляет сообщение и трекает его ID."""
-    msg = await update.message.reply_text(text, **kwargs)
-    track_msg(context, msg)
-    return msg
-
-
+# ─────────────────────────────────────────────
+#  ДИАЛОГ ПРИХОД / РАСХОД
+# ─────────────────────────────────────────────
 async def step_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update):
         return ConversationHandler.END
     track_msg(context, update.message)
     text = update.message.text.strip()
+
+    # Навигация по главному меню
     if "Баланс" in text:
         await cmd_balance(update, context)
         return STEP_TYPE
@@ -629,6 +700,8 @@ async def step_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "Редактировать" in text:
         await cmd_edit(update, context)
         return ConversationHandler.END
+
+    # Быстрый ввод
     parsed = parse_quick_input(text)
     if parsed:
         context.user_data["type"]  = parsed["type"]
@@ -642,19 +715,20 @@ async def step_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["uzs"] = parsed["amount"]
             context.user_data["usd"] = None
         if parsed["kassa"]:
-            kb = [["✅ Подтвердить", "❌ Отмена"]]
-            await update.message.reply_text(
+            bot_msg = await update.message.reply_text(
                 f"Проверь данные:\n\n{summary(context.user_data)}",
-                reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True),
+                reply_markup=confirm_kb(),
             )
+            track_msg(context, bot_msg)
             return STEP_CONFIRM
         else:
-            kb = [[k] for k in KASSAS]
-            await update.message.reply_text(
+            bot_msg = await update.message.reply_text(
                 f"Касса не распознана. Выбери:\n\n{summary(context.user_data)}",
-                reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True),
+                reply_markup=kassa_kb(),
             )
+            track_msg(context, bot_msg)
             return STEP_KASSA
+
     if "Приход" in text:
         context.user_data["type"] = "inflow"
     elif "Расход" in text:
@@ -662,78 +736,117 @@ async def step_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(
             "Выбери действие или напиши быстро:\nприход 500000 Импорт Савдо зарплата",
-            reply_markup=MAIN_MENU
+            reply_markup=MAIN_MENU,
         )
         return STEP_TYPE
-    kb = [[k] for k in KASSAS]
-    bot_msg = await update.message.reply_text("🏦 Выбери кассу:",
-        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True))
+
+    bot_msg = await update.message.reply_text("🏦 Выбери кассу:", reply_markup=kassa_kb())
     track_msg(context, bot_msg)
     return STEP_KASSA
 
 async def step_kassa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     track_msg(context, update.message)
     text = update.message.text.strip()
+
+    # ← Отмена
+    if text == CANCEL_BTN:
+        await go_to_main(update, context)
+        return STEP_TYPE
+
     if text not in KASSAS:
-        kb = [[k] for k in KASSAS]
-        await update.message.reply_text("Выбери из списка:",
-            reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True))
+        bot_msg = await update.message.reply_text("Выбери из списка:", reply_markup=kassa_kb())
+        track_msg(context, bot_msg)
         return STEP_KASSA
+
     context.user_data["kassa"] = text
+
+    # Если пришли из быстрого ввода — сразу на подтверждение
     if "uzs" in context.user_data or "usd" in context.user_data:
-        kb = [["✅ Подтвердить", "❌ Отмена"]]
-        await update.message.reply_text(
+        bot_msg = await update.message.reply_text(
             f"Проверь данные:\n\n{summary(context.user_data)}",
-            reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True),
+            reply_markup=confirm_kb(),
         )
+        track_msg(context, bot_msg)
         return STEP_CONFIRM
-    bot_msg = await update.message.reply_text("💵 Сумма UZS (или 0):", reply_markup=ReplyKeyboardRemove())
+
+    bot_msg = await update.message.reply_text("💵 Сумма UZS (или 0):", reply_markup=cancel_only_kb())
     track_msg(context, bot_msg)
     return STEP_UZS
 
 async def step_uzs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     track_msg(context, update.message)
-    text = update.message.text.strip().replace(" ", "").replace(",", ".")
+    text = update.message.text.strip()
+
+    # ← Отмена
+    if text == CANCEL_BTN:
+        await go_to_main(update, context)
+        return STEP_TYPE
+
+    text = text.replace(" ", "").replace(",", ".")
     try:
         val = float(text)
         context.user_data["uzs"] = val if val > 0 else None
     except ValueError:
-        await update.message.reply_text("Введи число, например: 500000 или 0")
+        bot_msg = await update.message.reply_text(
+            "Введи число, например: 500000 или 0",
+            reply_markup=cancel_only_kb(),
+        )
+        track_msg(context, bot_msg)
         return STEP_UZS
-    bot_msg = await update.message.reply_text("💲 Сумма USD (или 0):")
+
+    bot_msg = await update.message.reply_text("💲 Сумма USD (или 0):", reply_markup=cancel_only_kb())
     track_msg(context, bot_msg)
     return STEP_USD
 
 async def step_usd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     track_msg(context, update.message)
-    text = update.message.text.strip().replace(" ", "").replace(",", ".")
+    text = update.message.text.strip()
+
+    # ← Отмена
+    if text == CANCEL_BTN:
+        await go_to_main(update, context)
+        return STEP_TYPE
+
+    text = text.replace(" ", "").replace(",", ".")
     try:
         val = float(text)
         context.user_data["usd"] = val if val > 0 else None
     except ValueError:
-        await update.message.reply_text("Введи число, например: 100 или 0")
+        bot_msg = await update.message.reply_text(
+            "Введи число, например: 100 или 0",
+            reply_markup=cancel_only_kb(),
+        )
+        track_msg(context, bot_msg)
         return STEP_USD
-    bot_msg = await update.message.reply_text("📝 Назначение / комментарий:")
+
+    bot_msg = await update.message.reply_text("📝 Назначение / комментарий:", reply_markup=cancel_only_kb())
     track_msg(context, bot_msg)
     return STEP_NOTE
 
 async def step_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
     track_msg(context, update.message)
-    context.user_data["note"] = update.message.text.strip()
+    text = update.message.text.strip()
+
+    # ← Отмена
+    if text == CANCEL_BTN:
+        await go_to_main(update, context)
+        return STEP_TYPE
+
+    context.user_data["note"] = text
     context.user_data["date"] = datetime.today()
+
     if context.user_data.get("type") == "inflow":
-        kb = [["👤 Клиент", "🔄 Другое"]]
         bot_msg = await update.message.reply_text(
-            "Тип прихода:",
-            reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True),
+            "🏷 Тип прихода:",
+            reply_markup=income_type_kb(),
         )
         track_msg(context, bot_msg)
         return STEP_INCOME_TYPE
+
     context.user_data["income_type"] = None
-    kb = [["✅ Подтвердить", "❌ Отмена"]]
     bot_msg = await update.message.reply_text(
         f"Проверь данные:\n\n{summary(context.user_data)}",
-        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True),
+        reply_markup=confirm_kb(),
     )
     track_msg(context, bot_msg)
     return STEP_CONFIRM
@@ -741,19 +854,24 @@ async def step_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def step_income_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     track_msg(context, update.message)
     text = update.message.text.strip()
+
+    # ← Отмена
+    if text == CANCEL_BTN:
+        await go_to_main(update, context)
+        return STEP_TYPE
+
     if "Клиент" in text:
         context.user_data["income_type"] = "Клиент"
     elif "Другое" in text:
         context.user_data["income_type"] = "Другое"
     else:
-        kb = [["👤 Клиент", "🔄 Другое"]]
-        await update.message.reply_text("Выбери тип:",
-            reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True))
+        bot_msg = await update.message.reply_text("Выбери тип:", reply_markup=income_type_kb())
+        track_msg(context, bot_msg)
         return STEP_INCOME_TYPE
-    kb = [["✅ Подтвердить", "❌ Отмена"]]
+
     bot_msg = await update.message.reply_text(
         f"Проверь данные:\n\n{summary(context.user_data)}",
-        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True),
+        reply_markup=confirm_kb(),
     )
     track_msg(context, bot_msg)
     return STEP_CONFIRM
@@ -761,20 +879,19 @@ async def step_income_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def step_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     track_msg(context, update.message)
     text = update.message.text
-    if "Отмена" in text:
-        chat_id = update.message.chat_id
-        await delete_dialog_messages(context, chat_id)
-        context.user_data.clear()
-        await context.bot.send_message(chat_id=chat_id, text="Отменено.", reply_markup=MAIN_MENU)
+
+    # ← Отмена
+    if CANCEL_BTN in text:
+        await go_to_main(update, context)
         return STEP_TYPE
+
     if "Подтвердить" not in text:
-        kb = [["✅ Подтвердить", "❌ Отмена"]]
-        bot_msg = await update.message.reply_text("Нажми кнопку:",
-            reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True))
+        bot_msg = await update.message.reply_text("Нажми кнопку:", reply_markup=confirm_kb())
         track_msg(context, bot_msg)
         return STEP_CONFIRM
-    ud = context.user_data
-    t  = ud.get("type")
+
+    ud  = context.user_data
+    t   = ud.get("type")
     data = {
         "date":        ud.get("date", datetime.today()),
         "kassa":       ud["kassa"],
@@ -788,25 +905,25 @@ async def step_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     saving_msg = await update.message.reply_text("Сохраняю...", reply_markup=ReplyKeyboardRemove())
     track_msg(context, saving_msg)
+
     ok, msg = write_transaction(data)
 
-    # Удаляем весь диалог
     await delete_dialog_messages(context, chat_id)
-
-    # Показываем краткий итог
     await context.bot.send_message(
         chat_id=chat_id,
         text=f"✅ Сохранено! {msg}" if ok else f"❌ {msg}",
-        reply_markup=MAIN_MENU
+        reply_markup=MAIN_MENU,
     )
     context.user_data.clear()
     return STEP_TYPE
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
-    await update.message.reply_text("Отменено.", reply_markup=MAIN_MENU)
+    await go_to_main(update, context)
     return STEP_TYPE
 
+# ─────────────────────────────────────────────
+#  АВТО-ОТЧЁТЫ
+# ─────────────────────────────────────────────
 async def morning_report(context):
     if not ALLOWED_IDS:
         return
@@ -848,6 +965,9 @@ async def evening_report(context):
         except Exception as e:
             logger.error(f"Evening report error {uid}: {e}")
 
+# ─────────────────────────────────────────────
+#  ЗАПУСК
+# ─────────────────────────────────────────────
 def main():
     start_health_server()
     app = Application.builder().token(BOT_TOKEN).build()
